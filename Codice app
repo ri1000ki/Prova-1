@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title id="appTitle">Ricette Veloce Frigo-AI</title>
+    <!-- Carica Tailwind CSS per uno stile moderno e responsive -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Impostazioni di base per il font e l'altezza su mobile */
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f7f9fc;
+            min-height: 100vh;
+        }
+        /* Stile per il loader */
+        .loader {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #3b82f6;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        /* Stile per il contenuto della ricetta */
+        .recipe-content p, .recipe-content ul, .recipe-content ol, .recipe-content li {
+            font-size: 1rem;
+            line-height: 1.6;
+        }
+        .recipe-content h2 {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: #1f2937;
+            margin-top: 1.5rem;
+            margin-bottom: 0.5rem;
+            border-bottom: 2px solid #3b82f6;
+            padding-bottom: 4px;
+        }
+        /* Assicura che l'interfaccia sia fluida */
+        .w-full { width: 100%; }
+        .max-w-lg { max-width: 40rem; }
+    </style>
+</head>
+<body class="p-4 flex flex-col items-center">
+
+    <div class="w-full max-w-lg">
+        <!-- Header -->
+        <header class="mb-6 p-4 bg-white rounded-xl shadow-lg">
+            <div class="flex justify-between items-center mb-2">
+                <h1 id="headerTitle" class="text-3xl font-extrabold text-blue-600">Frigo-Chef AI</h1>
+                <!-- Selettore Lingua per la dimostrazione/test -->
+                <select id="languageSelector" class="p-2 border border-gray-300 rounded-lg text-sm bg-gray-50 focus:ring-blue-500 focus:border-blue-500" onchange="setAppLanguage(this.value)">
+                    <option value="it">Italiano</option>
+                    <option value="en">English</option>
+                    <option value="es">Español</option>
+                </select>
+            </div>
+            <p id="headerSubtitle" class="text-gray-500 mt-1">Cucina con quello che hai, senza sprechi.</p>
+        </header>
+
+        <!-- Pulsante SCATTA FOTO -->
+        <button id="photoButton" 
+                onclick="showMessage(languageStrings[currentLang].buttonActionMessage)"
+                class="w-full flex items-center justify-center p-4 mb-6 bg-green-500 text-white font-bold text-lg rounded-xl shadow-lg hover:bg-green-600 transition duration-150 transform hover:scale-[1.01] active:scale-[0.99] focus:outline-none focus:ring-4 focus:ring-green-300">
+            <!-- SVG Camera Icon (Inline for maximum compatibility) -->
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-6 h-6 mr-3">
+                <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/>
+                <circle cx="12" cy="13" r="3"/>
+            </svg>
+            <span id="buttonText">Scatta Foto al Frigo</span>
+        </button>
+
+        <!-- Area Status e Output -->
+        <div id="statusArea" class="bg-yellow-100 text-yellow-800 p-3 rounded-xl mb-4 text-center font-medium transition-all duration-300" style="display:none;">
+            Attendere... Analisi dell'immagine in corso.
+        </div>
+
+        <!-- Area Immagine (Anteprima, visibile dopo lo scatto) -->
+        <div id="imagePreviewContainer" class="mb-6 hidden">
+            <p id="imagePreviewText" class="text-sm font-semibold text-gray-700 mb-2">Immagine Caricata:</p>
+            <img id="imagePreview" class="w-full h-48 object-cover rounded-xl shadow-md border-2 border-gray-200" alt="Anteprima dell'immagine del frigo">
+        </div>
+
+        <!-- Area Risultato Ricetta -->
+        <div id="recipeOutput" class="bg-white p-6 rounded-xl shadow-lg border-t-4 border-blue-500">
+            <h2 class="text-xl font-bold text-gray-800 mb-3">La Tua Ricetta Personalizzata Apparirà Qui</h2>
+            <p class="text-gray-500">
+                Premi "Scatta Foto al Frigo" per iniziare. L'AI genererà una ricetta
+                utilizzando solo gli ingredienti che hai a disposizione.
+            </p>
+        </div>
+        
+        <!-- Area del Loader (Centrata) -->
+        <div id="loaderArea" class="flex justify-center items-center mt-8" style="display:none;">
+            <div class="loader"></div>
+        </div>
+
+        <!-- Area Errori -->
+        <div id="errorArea" class="bg-red-100 text-red-700 p-4 rounded-xl mt-4 hidden font-medium text-center">
+            Si è verificato un errore.
+        </div>
+    </div>
+
+    <script>
+        // Variabili globali
+        const apiKey = ""; 
+        const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+        
+        let currentLang = 'it'; // Lingua di default
+
+        // ELEMENTI UI
+        const recipeOutput = document.getElementById('recipeOutput');
+        const statusArea = document.getElementById('statusArea');
+        const loaderArea = document.getElementById('loaderArea');
+        const errorArea = document.getElementById('errorArea');
+        const imagePreview = document.getElementById('imagePreview');
+        const imagePreviewContainer = document.getElementById('imagePreviewContainer');
+
+        // DIZIONARIO DELLE LINGUE (Nuova Aggiunta)
+        const languageStrings = {
+            'it': {
+                appTitle: "Ricette Veloce Frigo-AI",
+                headerTitle: "Frigo-Chef AI",
+                headerSubtitle: "Cucina con quello che hai, senza sprechi.",
+                buttonText: "Scatta Foto al Frigo",
+                buttonActionMessage: "Azione intercettata da App Inventor. Per favore, usa i blocchi per aprire la fotocamera.",
+                imagePreviewText: "Immagine Caricata:",
+                recipeOutputTitle: "La Tua Ricetta Personalizzata Apparirà Qui",
+                welcomeMessageTitle: "Pronto per Cucinare!",
+                welcomeMessageBody: "Premi \"Scatta Foto al Frigo\" per iniziare. L'AI genererà una ricetta utilizzando solo gli ingredienti che hai a disposizione.",
+                loadingMessage: "Attendere... Analisi dell'immagine in corso.",
+                analyzingMessage: "Analisi degli ingredienti...",
+                errorMessage: "Impossibile generare la ricetta. Prova con una foto più chiara.",
+                errorTitle: "Generazione Fallita",
+                systemPrompt: "Sei uno chef AI specializzato nell'anti-spreco. Analizza l'immagine fornita, identifica tutti gli ingredienti alimentari commestibili presenti e genera una singola, deliziosa ricetta in italiano che utilizzi il massimo degli ingredienti identificati. La ricetta deve essere veloce (max 20 minuti) e avere una difficoltà Bassa. Formatta la risposta SOLO con il Titolo come heading di primo livello e i Passaggi come lista numerata, senza introduzioni o saluti, usando Markdown.",
+                userQuery: "Ecco gli ingredienti in questo momento. Per favore, genera la ricetta come richiesto."
+            },
+            'en': {
+                appTitle: "Quick Recipe Fridge-AI",
+                headerTitle: "Fridge-Chef AI",
+                headerSubtitle: "Cook with what you have, zero waste.",
+                buttonText: "Take Photo of Fridge",
+                buttonActionMessage: "Action intercepted by App Inventor. Please use blocks to open the camera.",
+                imagePreviewText: "Image Loaded:",
+                recipeOutputTitle: "Your Custom Recipe Will Appear Here",
+                welcomeMessageTitle: "Ready to Cook!",
+                welcomeMessageBody: "Press \"Take Photo of Fridge\" to start. The AI will generate a recipe using only the ingredients you have available.",
+                loadingMessage: "Please wait... Image analysis in progress.",
+                analyzingMessage: "Analyzing ingredients...",
+                errorMessage: "Could not generate the recipe. Try a clearer photo.",
+                errorTitle: "Generation Failed",
+                systemPrompt: "You are an AI chef specialized in anti-food waste. Analyze the provided image, identify all edible food ingredients present, and generate a single, delicious recipe in **English** that uses the maximum number of identified ingredients. The recipe must be quick (max 20 minutes) and have a low difficulty level. Format the response ONLY with the Title as a first-level heading and Steps as a numbered list, without introductions or greetings, using Markdown.",
+                userQuery: "Here are the ingredients right now. Please generate the recipe as requested."
+            },
+            'es': {
+                appTitle: "Receta Rápida Nevera-IA",
+                headerTitle: "Chef-Nevera IA",
+                headerSubtitle: "Cocina con lo que tienes, sin desperdicio.",
+                buttonText: "Tomar Foto a la Nevera",
+                buttonActionMessage: "Acción interceptada por App Inventor. Utiliza bloques para abrir la cámara.",
+                imagePreviewText: "Imagen Cargada:",
+                recipeOutputTitle: "Tu Receta Personalizada Aparecerá Aquí",
+                welcomeMessageTitle: "¡Listo para Cocinar!",
+                welcomeMessageBody: "Presiona \"Tomar Foto a la Nevera\" para empezar. La IA generará una receta usando solo los ingredientes que tienes disponibles.",
+                loadingMessage: "Espere... Análisis de imagen en curso.",
+                analyzingMessage: "Analizando ingredientes...",
+                errorMessage: "No se pudo generar la receta. Intenta con una foto más clara.",
+                errorTitle: "Generación Fallida",
+                systemPrompt: "Eres un chef de IA especializado en antidesperdicio de alimentos. Analiza la imagen proporcionada, identifica todos los ingredientes comestibles presentes y genera una única y deliciosa receta en **Español** que utilice la mayor cantidad de ingredientes identificados. La receta debe ser rápida (máximo 20 minutos) y tener una dificultad Baja. Formatea la respuesta SÓLO con el Título como encabezado de primer nivel y los Pasos como una lista numerada, sin introducciones ni saludos, usando Markdown.",
+                userQuery: "Aquí están los ingredientes ahora mismo. Por favor, genera la receta como se solicita."
+            }
+        };
+
+        /**
+         * Funzione per aggiornare l'interfaccia utente alla lingua selezionata.
+         * CHIAMATA DA APP INVENTOR: WebViewer.RunJavaScript("setAppLanguage('en')")
+         * @param {string} langCode - Codice lingua (es. 'it', 'en', 'es').
+         */
+        function setAppLanguage(langCode) {
+            if (languageStrings[langCode]) {
+                currentLang = langCode;
+                const strings = languageStrings[currentLang];
+                
+                // Aggiorna elementi statici
+                document.getElementById('appTitle').textContent = strings.appTitle;
+                document.getElementById('headerTitle').textContent = strings.headerTitle;
+                document.getElementById('headerSubtitle').textContent = strings.headerSubtitle;
+                document.getElementById('buttonText').textContent = strings.buttonText;
+                document.getElementById('imagePreviewText').textContent = strings.imagePreviewText;
+                
+                // Aggiorna messaggio di benvenuto
+                updateWelcomeMessage();
+
+                // Aggiorna il selettore se non è già impostato (per coerenza)
+                document.getElementById('languageSelector').value = langCode;
+                console.log(`Lingua impostata su: ${langCode}`);
+            } else {
+                console.warn(`Lingua ${langCode} non supportata. Mantenuta la lingua corrente.`);
+            }
+        }
+
+        function updateWelcomeMessage() {
+             const strings = languageStrings[currentLang];
+             recipeOutput.innerHTML = `
+                <h2 class="text-xl font-bold text-gray-800 mb-3">${strings.welcomeMessageTitle}</h2>
+                <p class="text-gray-500">
+                    ${strings.welcomeMessageBody}
+                </p>
+             `;
+        }
+
+        /**
+         * Funzione di debug/messaggio per il pulsante HTML.
+         * @param {string} message - Il messaggio da visualizzare.
+         */
+        function showMessage(message) {
+            console.log(message);
+            statusArea.style.backgroundColor = '#dbeafe'; // blue-100
+            statusArea.style.color = '#1e40af'; // blue-800
+            statusArea.innerHTML = message;
+            statusArea.style.display = 'block';
+            setTimeout(() => { statusArea.style.display = 'none'; }, 5000);
+        }
+
+        /**
+         * Funzione principale chiamata dall'ambiente MIT App Inventor.
+         * @param {string} base64Image - L'immagine codificata in Base64 (senza il prefisso 'data:image/...').
+         */
+        async function processImageAndGenerateRecipe(base64Image) {
+            const strings = languageStrings[currentLang];
+            
+            // 1. Reset UI e Mostra Loading
+            recipeOutput.innerHTML = `<h2 class="text-xl font-bold text-gray-800 mb-3">${strings.analyzingMessage}</h2>`;
+            statusArea.innerHTML = strings.loadingMessage;
+            statusArea.style.backgroundColor = '#fef3c7'; // yellow-100
+            statusArea.style.color = '#92400e'; // yellow-800
+            statusArea.style.display = 'block';
+            loaderArea.style.display = 'flex';
+            errorArea.classList.add('hidden');
+
+            // Mostra anteprima immagine
+            imagePreview.src = `data:image/jpeg;base64,${base64Image}`;
+            imagePreviewContainer.classList.remove('hidden');
+
+            // --- USO DEL PROMPT TRADOTTO IN BASE ALLA LINGUA CORRENTE ---
+            const systemPrompt = strings.systemPrompt;
+            const userQuery = strings.userQuery;
+            
+            const payload = {
+                contents: [
+                    {
+                        role: "user",
+                        parts: [
+                            { text: userQuery },
+                            {
+                                inlineData: {
+                                    mimeType: "image/jpeg", 
+                                    data: base64Image.replace(/data:image\/(jpeg|png|gif);base64,/, '') 
+                                }
+                            }
+                        ]
+                    }
+                ],
+                systemInstruction: {
+                    parts: [{ text: systemPrompt }]
+                }
+            };
+
+            let attempts = 0;
+            const maxAttempts = 5;
+            let responseData = null;
+
+            while (attempts < maxAttempts) {
+                try {
+                    const fetchOptions = {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    };
+
+                    const response = await fetch(apiUrl, fetchOptions);
+
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    
+                    responseData = await response.json();
+                    break; 
+                } catch (error) {
+                    attempts++;
+                    console.error(`Attempt ${attempts} failed:`, error);
+                    if (attempts >= maxAttempts) {
+                        throw new Error("Errore API persistente dopo diversi tentativi.");
+                    }
+                    const delay = Math.pow(2, attempts) * 1000; 
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                }
+            }
+
+
+            // 2. Processa Risposta
+            loaderArea.style.display = 'none';
+            statusArea.style.display = 'none';
+            
+            const text = responseData?.candidates?.[0]?.content?.parts?.[0]?.text;
+            
+            if (text) {
+                const htmlContent = convertMarkdownToHtml(text);
+                recipeOutput.innerHTML = `<div class="recipe-content">${htmlContent}</div>`;
+                recipeOutput.scrollIntoView({ behavior: 'smooth' });
+
+            } else {
+                console.error("Risposta AI non valida:", responseData);
+                errorArea.classList.remove('hidden');
+                errorArea.innerHTML = strings.errorMessage;
+                recipeOutput.innerHTML = `<h2 class="text-xl font-bold text-gray-800 mb-3">${strings.errorTitle}</h2><p class="text-red-500">${strings.errorMessage}</p>`;
+            }
+
+        }
+
+        // Funzione semplificata per convertire Markdown essenziale in HTML
+        function convertMarkdownToHtml(markdown) {
+            let html = markdown;
+            html = html.replace(/^#\s*(.*)$/gm, '<h2>$1</h2>');
+            html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+            html = html.replace(/^\s*\d+\.\s*(.*)$/gm, '<li>$1</li>');
+            html = html.replace(/<li>.*<\/li>(\s*<li>.*<\/li>)*/s, '<ol class="list-decimal list-inside pl-4 mt-2">$&</ol>');
+            
+            html = html.split('\n\n').map(p => {
+                if (!p.startsWith('<h2>') && !p.startsWith('<ol>')) {
+                    return `<p class="mb-3">${p.trim()}</p>`;
+                }
+                return p;
+            }).join('');
+            return html;
+        }
+
+        // Espone la funzione per MIT App Inventor/WebViewer
+        window.processImageAndGenerateRecipe = processImageAndGenerateRecipe;
+        window.setAppLanguage = setAppLanguage;
+
+        // Inizializzazione: Assicurati che l'HTML sia pronto a ricevere comandi
+        document.addEventListener('DOMContentLoaded', updateWelcomeMessage);
+        
+    </script>
+</body>
+</html>
